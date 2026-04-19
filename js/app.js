@@ -1,4 +1,5 @@
 import FOOD_DB from './foods.js';
+import { createFoodMemory } from './memory.js';
 
 /* ══════════════════════════════════════════════════════
    NUTRILOG — v5  (clean unified rewrite)
@@ -7,9 +8,14 @@ import FOOD_DB from './foods.js';
 ══════════════════════════════════════════════════════ */
 
 /* ─── Custom foods ─────────────────────────────────── */
-let USER_DB      = JSON.parse(localStorage.getItem('nutrilog_userfoods') || '{}');
-function getAllFoods() { return { ...FOOD_DB, ...USER_DB }; }
-function persistUserDB() { _save('nutrilog_userfoods', USER_DB); }
+const storage = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v) { localStorage.setItem(k, JSON.stringify(v)); }
+};
+let USER_DB      = storage.get('nutrilog_userfoods', {});
+const foodMemory = createFoodMemory(FOOD_DB, USER_DB);
+function getAllFoods() { return foodMemory.getAll(); }
+function persistUserDB() { _save('nutrilog_userfoods', USER_DB); foodMemory.setUserFoods(USER_DB); }
 
 /* ─── Persistent state ─────────────────────────────── */
 let goals        = _load('nutrilog_goals')        || { cal:2000, prot:150, carb:250, fat:65 };
@@ -44,6 +50,16 @@ let portionMemory  = _load('nutrilog_portion_memory') || {};
 let savedPulseTimer= null;
 let compareFood    = null;
 let mealTemplatesCache = {};
+let waterUndoStack = _load('nutrilog_water_undo') || [];
+const state = {
+  logEntries,
+  totals: dailyTotals,
+  water: waterMl,
+  history,
+  savedFoods,
+  theme,
+  goals
+};
 
 /* ─── Tiny helpers ─────────────────────────────────── */
 function _save(k, v) {
@@ -77,6 +93,18 @@ function setText(id,v) { const e=document.getElementById(id); if(e) e.textConten
 function setVal(id,v)  { const e=document.getElementById(id); if(e) e.value=v; }
 function setW(id,pct)  { const e=document.getElementById(id); if(e) e.style.width=Math.min(100,pct)+'%'; }
 function g(id)         { return document.getElementById(id); }
+function closeModalById(id) { g(id)?.classList.remove('open'); }
+function initSplashScreen() {
+  const splash = g('splashScreen');
+  const finish = () => {
+    document.body.classList.add('app-ready');
+    splash?.classList.add('hide');
+    setTimeout(() => splash?.remove(), 700);
+  };
+  if (document.readyState === 'complete') setTimeout(finish, 500);
+  else window.addEventListener('load', () => setTimeout(finish, 500), { once: true });
+  setTimeout(finish, 2200); // safety fallback
+}
 
 /* ─── Init: day rollover + load today ─────────────── */
 (function init() {
@@ -97,13 +125,16 @@ function g(id)         { return document.getElementById(id); }
     localStorage.setItem('nutrilog_date', today);
     localStorage.removeItem('nutrilog_log_today');
     localStorage.removeItem('nutrilog_water_today');
+    localStorage.removeItem('nutrilog_water_undo');
     localStorage.removeItem('nutrilog_burned_today');
     _updateStreak(today);
     waterMl = caloriesBurned = 0;
+    waterUndoStack = [];
   } else {
     if (!saved) localStorage.setItem('nutrilog_date', today);
     logEntries     = _load('nutrilog_log_today') || [];
     waterMl        = parseInt(localStorage.getItem('nutrilog_water_today') || '0');
+    waterUndoStack = _load('nutrilog_water_undo') || [];
     caloriesBurned = parseInt(localStorage.getItem('nutrilog_burned_today') || '0');
   }
   recomputeTotals();
@@ -193,8 +224,10 @@ function lev(a,b) {
 }
 function matchKeys(q) {
   if(!q) return [];
-  const db=getAllFoods();
-  return Object.keys(db).map(k=>({k,s:scoreMatch(db[k],k,q)})).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).map(x=>x.k);
+  return foodMemory.search(q, {
+    saved: new Set(savedFoods),
+    recent: new Set(recentFoods.map(r => r.key))
+  });
 }
 function hlMatch(name,q) {
   const li=name.toLowerCase().indexOf(q.toLowerCase());
@@ -207,7 +240,7 @@ function renderSuggestions(keys) {
   if (!q) { renderRecentsDropdown(); return; }
   if (!keys.length) {
     suggestBox.innerHTML=`<div class="sug-empty">No results for "<strong>${escHtml(q)}</strong>"
-      <button class="sug-add-custom" onclick="openAddFoodModal('${escAttr(q)}')">+ Add as custom food</button></div>`;
+      <button class="sug-add-custom" data-action="open-add-food" data-query="${escAttr(q)}">+ Add as custom food</button></div>`;
     suggestBox.classList.add('open'); return;
   }
   const cats=new Map();
@@ -225,7 +258,7 @@ function renderSuggestions(keys) {
     }).join('');
   }
   if(keys.length>36) html+=`<div class="sug-more">+${keys.length-36} more — keep typing</div>`;
-  html+=`<div class="sug-footer"><button class="sug-add-custom" onclick="openAddFoodModal('${escAttr(q)}')">+ Add "${escHtml(q)}" as custom food</button></div>`;
+  html+=`<div class="sug-footer"><button class="sug-add-custom" data-action="open-add-food" data-query="${escAttr(q)}">+ Add "${escHtml(q)}" as custom food</button></div>`;
   suggestBox.innerHTML=html; suggestBox.classList.add('open');
 }
 
@@ -240,7 +273,7 @@ function renderRecentsDropdown() {
       <span class="sug-meta">${escHtml(r.portion)} · ${r.cal} kcal last time</span></div>
       <span class="sug-cal">${f.cal} kcal/${f.base}${f.unit}</span></div>`;
   }).filter(Boolean).join('');
-  html+=`<div class="sug-footer recents-footer"><button class="sug-clear-recents" onclick="clearRecents()">Clear recents</button></div>`;
+  html+=`<div class="sug-footer recents-footer"><button class="sug-clear-recents" data-action="clear-recents">Clear recents</button></div>`;
   suggestBox.innerHTML=html; suggestBox.classList.add('open');
 }
 function clearRecents() { recentFoods=[]; _save('nutrilog_recents',recentFoods); suggestBox.classList.remove('open'); showToast('Recents cleared'); }
@@ -262,11 +295,11 @@ const FILTER_PILLS=[
 ];
 (function(){
   const w=g('searchFilterPills'); if(!w) return;
-  w.innerHTML=FILTER_PILLS.map(f=>`<button class="search-filter-pill" onclick="applyFilter('${escAttr(f.q)}')">${f.l}</button>`).join('');
+  w.innerHTML=FILTER_PILLS.map(f=>`<button class="search-filter-pill" data-action="apply-filter" data-filter="${escAttr(f.q)}">${f.l}</button>`).join('');
 })();
 function applyFilter(q) {
   foodInput.value=q; foodInput.dispatchEvent(new Event('input'));
-  document.querySelectorAll('.search-filter-pill').forEach(b=>b.classList.toggle('active',b.onclick?.toString().includes(`'${q}'`)));
+  document.querySelectorAll('.search-filter-pill').forEach(b=>b.classList.toggle('active', b.dataset.filter === q));
   foodInput.focus();
 }
 window.applyFilter=applyFilter;
@@ -602,7 +635,7 @@ function renderLog() {
     const mf=+entries.reduce((s,e)=>s+e.fat,0).toFixed(1);
     const isCol=collapsedMeals.has(meal);
     html+=`<div class="meal-group">
-      <div class="meal-group-header" onclick="toggleMealCollapse('${escAttr(meal)}')">
+      <div class="meal-group-header" data-action="toggle-meal" data-meal="${escAttr(meal)}">
         <div class="meal-header-left">
           <span class="meal-chevron">${isCol?'▶':'▼'}</span>
           <span class="meal-name">${escHtml(meal)}</span>
@@ -626,16 +659,16 @@ function renderLog() {
             <div class="entry-head">
               <div class="entry-info">
                 <div class="entry-name">${escHtml(e.name)}${e.custom?'<span class="custom-badge">custom</span>':''}</div>
-                <div class="entry-meta">${escHtml(e.portion)} · ${e.time}${e.note?`<span class="entry-note" onclick="editEntryNote(${e.id})"> 📝 ${escHtml(e.note)}</span>`:''}</div>
+                <div class="entry-meta">${escHtml(e.portion)} · ${e.time}${e.note?`<span class="entry-note" data-action="edit-entry-note" data-entry-id="${e.id}"> 📝 ${escHtml(e.note)}</span>`:''}</div>
               </div>
               <div class="entry-actions">
-                <button class="ea-btn" onclick="duplicateEntry(${e.id})" title="Log again">⎘</button>
-                <button class="ea-btn" onclick="editEntryPortion(${e.id})" title="Edit portion">✏</button>
-                <button class="ea-btn" onclick="editEntryNote(${e.id})" title="Note">📝</button>
+                <button class="ea-btn" data-action="duplicate-entry" data-entry-id="${e.id}" title="Log again">⎘</button>
+                <button class="ea-btn" data-action="edit-entry-portion" data-entry-id="${e.id}" title="Edit portion">✏</button>
+                <button class="ea-btn" data-action="edit-entry-note" data-entry-id="${e.id}" title="Note">📝</button>
                 <select class="entry-meal-sel" onchange="changeMealForEntry(${e.id},this.value)" title="Move to meal">
                   ${mealGroups.map(m=>`<option value="${escAttr(m)}"${m===e.meal?' selected':''}>${escHtml(m)}</option>`).join('')}
                 </select>
-                <button class="ea-btn ea-del" onclick="deleteEntry(${e.id})" title="Delete">✕</button>
+                <button class="ea-btn ea-del" data-action="delete-entry" data-entry-id="${e.id}" title="Delete">✕</button>
               </div>
             </div>
             <div class="entry-macros">
@@ -774,14 +807,16 @@ function updateMotivationalMsg() {
 ══════════════════════════════════════════════════════ */
 function updateWaterUI() {
   const pct = Math.min(100, (waterMl / waterGoal) * 100);
+  const visualPct = Math.max(4, pct); // keep a tiny baseline so the water area never looks broken/empty
+  const level = 100 - visualPct;
 
   // Wave animation
+  const wrap = g('waterWaveWrap');
   const bg = g('waterWaveBg');
-  if (bg) bg.style.height = pct + '%';
+  if (bg) bg.style.transform = `translateY(${level}%)`;
   const w1 = g('waterWave1'), w2 = g('waterWave2');
-  const waveBottom = pct + '%';
-  if (w1) w1.style.bottom = waveBottom;
-  if (w2) w2.style.bottom = waveBottom;
+  if (w1) w1.style.transform = `translateY(${level}%)`;
+  if (w2) w2.style.transform = `translateY(${level}%)`;
   const pt = g('waterPctText');
   if (pt) pt.textContent = pct >= 5 ? Math.round(pct) + '%' : '';
 
@@ -791,8 +826,16 @@ function updateWaterUI() {
   const filled = Math.floor(waterMl / 250);
   const glasses = g('waterGlasses');
   if (glasses) glasses.innerHTML = Array.from({length:10}, (_,i) =>
-    `<button class="water-glass${i < filled ? ' full' : ''}" onclick="addWaterGlass(${i},${filled})" title="${i < filled ? 'Remove 250ml' : 'Add 250ml'}">💧</button>`
+    `<button class="water-glass${i < filled ? ' full' : ''}" data-action="add-water-glass" data-water-index="${i}" data-water-filled="${filled}" title="${i < filled ? 'Remove 250ml' : 'Add 250ml'}">💧</button>`
   ).join('');
+
+  const undoBtn = g('waterUndoBtn');
+  if (undoBtn) {
+    const last = waterUndoStack.at(-1);
+    undoBtn.disabled = !last;
+    undoBtn.title = last ? `Undo ${last > 0 ? '+' : ''}${last}ml` : 'No water change to undo';
+  }
+  if (wrap) wrap.classList.toggle('goal-reached', waterMl >= waterGoal);
 }
 
 function addWaterGlass(idx, filled) {
@@ -806,16 +849,64 @@ function addWaterGlass(idx, filled) {
   }
 }
 window.addWaterGlass = addWaterGlass;
-function addWater(ml){
-  waterMl=Math.max(0,waterMl+ml); localStorage.setItem('nutrilog_water_today',waterMl); updateWaterUI();
-  if(ml>0&&waterMl>=waterGoal&&waterMl-ml<waterGoal) showToast('💧 Water goal reached! 🎉');
-  else if(ml>0) showToast(`+${ml}ml · ${(waterMl/1000).toFixed(1)}L today`);
+function addWater(ml, { trackUndo = true } = {}){
+  const prev = waterMl;
+  waterMl = Math.max(0, waterMl + ml);
+  const applied = waterMl - prev;
+  if (!applied) return;
+
+  const wrap = g('waterWaveWrap');
+  wrap?.classList.remove('pulse-up','pulse-down');
+  void wrap?.offsetWidth;
+  wrap?.classList.add(applied > 0 ? 'pulse-up' : 'pulse-down');
+  setTimeout(() => wrap?.classList.remove('pulse-up','pulse-down'), 520);
+
+  if (trackUndo) {
+    waterUndoStack.push(applied);
+    if (waterUndoStack.length > 30) waterUndoStack.shift();
+    _save('nutrilog_water_undo', waterUndoStack);
+  }
+  localStorage.setItem('nutrilog_water_today',waterMl);
+  _save('nutrilog_water_undo',waterUndoStack);
+  updateWaterUI();
+
+  if (applied > 0 && waterMl >= waterGoal && prev < waterGoal) {
+    showToast('💧 Water goal reached! 🎉');
+  } else {
+    const sign = applied > 0 ? '+' : '';
+    showToast(`${sign}${applied}ml · ${(waterMl/1000).toFixed(1)}L today`);
+  }
 }
 window.addWater=addWater;
 g('waterAdd250')?.addEventListener('click',()=>addWater(250));
 g('waterAdd500')?.addEventListener('click',()=>addWater(500));
 g('waterAdd750')?.addEventListener('click',()=>addWater(750));
-g('waterCustom')?.addEventListener('click',()=>{const a=parseInt(prompt('Add water (ml):','330'));if(a>0)addWater(a);});
+function addCustomWater() {
+  const a=parseInt(prompt('Add water (ml):','330'));
+  if(a>0)addWater(a);
+}
+function undoWater() {
+  const last = waterUndoStack.pop();
+  if (!last) return;
+  _save('nutrilog_water_undo', waterUndoStack);
+  addWater(-last, { trackUndo: false });
+}
+function resetWater() {
+  if (!waterMl) return;
+  addWater(-waterMl);
+}
+function setWaterGoalQuick() {
+  const next = parseInt(prompt('Set daily water goal (ml):', String(waterGoal)));
+  if (!Number.isFinite(next)) return;
+  waterGoal = Math.max(100, next);
+  localStorage.setItem('nutrilog_watergoal', waterGoal);
+  updateWaterUI();
+  showToast(`Water goal set to ${(waterGoal/1000).toFixed(1).replace(/\.0$/,'')}L`);
+}
+g('waterCustom')?.addEventListener('click', addCustomWater);
+g('waterUndoBtn')?.addEventListener('click', undoWater);
+g('waterResetBtn')?.addEventListener('click', resetWater);
+g('editWaterGoalBtn')?.addEventListener('click', setWaterGoalQuick);
 
 /* ══════════════════════════════════════════════════════
    CALORIES BURNED
@@ -894,7 +985,7 @@ function renderHistoryDrawer() {
     const dt=new Date(dateStr+'T12:00:00');
     const label=dt.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
     return `<div class="hist-day" id="hday_${dateStr}">
-      <div class="hist-day-header" onclick="toggleHistDay('${dateStr}')">
+      <div class="hist-day-header" data-action="toggle-hist-day" data-date="${dateStr}">
         <div class="hist-day-left">
           <span class="hist-chevron" id="hchev_${dateStr}">▶</span>
           <div>
@@ -905,8 +996,8 @@ function renderHistoryDrawer() {
         <div class="hist-right">
           <div class="hist-bar-mini"><div style="width:${pct}%;background:var(--cal)"></div></div>
           <div class="hist-day-actions">
-            <button class="hist-action-btn" onclick="event.stopPropagation();loadHistoryDay('${dateStr}')" title="Load this day into today's log">📋 Load</button>
-            <button class="hist-action-btn hist-del-btn" onclick="event.stopPropagation();deleteHistoryDay('${dateStr}')" title="Delete this day">🗑</button>
+            <button class="hist-action-btn" data-action="load-history-day" data-date="${dateStr}" title="Load this day into today's log">📋 Load</button>
+            <button class="hist-action-btn hist-del-btn" data-action="delete-history-day" data-date="${dateStr}" title="Delete this day">🗑</button>
           </div>
         </div>
       </div>
@@ -923,8 +1014,8 @@ function renderHistoryDrawer() {
               <span class="hist-portion">${escHtml(e.portion||'')} · <span class="em cal" style="font-size:.65rem;padding:1px 4px">${e.cal} kcal</span></span>
             </div>
             <div class="hist-entry-actions">
-              <button class="hist-entry-btn" onclick="useHistoryEntry('${dateStr}',${i})" title="Use this food now">Use</button>
-              <button class="hist-entry-btn hist-entry-del" onclick="deleteHistoryEntry('${dateStr}',${i})" title="Remove this entry">✕</button>
+              <button class="hist-entry-btn" data-action="use-history-entry" data-date="${dateStr}" data-entry-index="${i}" title="Use this food now">Use</button>
+              <button class="hist-entry-btn hist-entry-del" data-action="delete-history-entry" data-date="${dateStr}" data-entry-index="${i}" title="Remove this entry">✕</button>
             </div>
           </div>`).join('')}
       </div>
@@ -991,7 +1082,7 @@ function renderCalorieHeatmap() {
     const cal=history[d].reduce((s,e)=>s+e.cal,0);
     const pct=goals.cal>0?(cal/goals.cal)*100:0;
     const lvl=pct<10?0:pct<40?1:pct<70?2:pct<100?3:4;
-    return `<div class="heat-cell lv${lvl}" title="${d}: ${cal} kcal (${Math.round(pct)}% of goal)" onclick="jumpToHistDay('${d}')"></div>`;
+    return `<div class="heat-cell lv${lvl}" title="${d}: ${cal} kcal (${Math.round(pct)}% of goal)" data-action="jump-hist-day" data-date="${d}"></div>`;
   });
 
   container.innerHTML=`
@@ -1015,6 +1106,7 @@ window.jumpToHistDay=jumpToHistDay;
    GOALS MODAL + TDEE
 ══════════════════════════════════════════════════════ */
 g('goalsBtn')?.addEventListener('click',openGoalsModal);
+g('editGoalsQuickBtn')?.addEventListener('click', openGoalsModal);
 g('closeGoalsModal')?.addEventListener('click',()=>g('goalsModal')?.classList.remove('open'));
 g('goalsModal')?.addEventListener('click',e=>{if(e.target===e.currentTarget)e.currentTarget.classList.remove('open');});
 function openGoalsModal(){
@@ -1152,7 +1244,7 @@ function renderMemoryDrawer() {
   const db=getAllFoods();
   const allCats=[...new Set(Object.values(db).map(f=>f.category||'Other'))].sort();
   const cats=g('memoryCats');
-  if(cats) cats.innerHTML=['All',...allCats].map(c=>`<button class="cat-pill${c===memoryCatFilter?' active':''}" onclick="setCatFilter('${escAttr(c)}')">${escHtml(c)}</button>`).join('');
+  if(cats) cats.innerHTML=['All',...allCats].map(c=>`<button class="cat-pill${c===memoryCatFilter?' active':''}" data-action="set-cat-filter" data-category="${escAttr(c)}">${escHtml(c)}</button>`).join('');
   const pass=k=>{const f=db[k];if(!f)return false;if(memoryCatFilter!=='All'&&f.category!==memoryCatFilter)return false;if(memoryFilter&&!f.name.toLowerCase().includes(memoryFilter)&&!(f.category||'').toLowerCase().includes(memoryFilter)&&!k.includes(memoryFilter))return false;return true;};
   const saved=savedFoods.filter(pass),custom=Object.keys(USER_DB).filter(pass),all=Object.keys(db).filter(pass);
   let html='';
@@ -1171,9 +1263,9 @@ function memCard(key,isSaved){
       <div class="mem-info"><div class="mem-name">${escHtml(f.name)}${isC?'<span class="custom-badge">custom</span>':''}</div>
       <div class="mem-cat">${escHtml(f.category||'')}${f.countable?' · by '+f.countable.unitName:''}</div></div>
       <div class="mem-actions">
-        <button class="mem-use-btn" onclick="useFromMemory('${key}')">Use →</button>
-        ${isSaved?`<button class="mem-pin-btn active" onclick="removeFromMemory('${key}')" title="Unsave">📌</button>`:`<button class="mem-pin-btn" onclick="addToMemory('${key}')" title="Save">📌</button>`}
-        ${isC?`<button class="mem-edit-btn" onclick="editCustomFood('${key}')" title="Edit">✏</button><button class="mem-del-btn" onclick="deleteCustomFood('${key}')" title="Delete">🗑</button>`:''}
+        <button class="mem-use-btn" data-action="use-from-memory" data-key="${key}">Use →</button>
+        ${isSaved?`<button class="mem-pin-btn active" data-action="remove-from-memory" data-key="${key}" title="Unsave">📌</button>`:`<button class="mem-pin-btn" data-action="add-to-memory" data-key="${key}" title="Save">📌</button>`}
+        ${isC?`<button class="mem-edit-btn" data-action="edit-custom-food" data-key="${key}" title="Edit">✏</button><button class="mem-del-btn" data-action="delete-custom-food" data-key="${key}" title="Delete">🗑</button>`:''}
       </div>
     </div>
     <div class="mem-table">
@@ -1218,7 +1310,7 @@ function renderTemplatesPanel(){
   const panel=g('templatesPanel');if(!panel)return;
   const keys=Object.keys(mealTemplates);
   if(!keys.length){panel.innerHTML=`<div class="tmpl-empty">No templates yet.<br>Log a full day then click 💾 to save it.</div>`;return;}
-  panel.innerHTML=keys.map(name=>{const e=mealTemplates[name];const cal=e.reduce((s,x)=>s+x.cal,0);return`<div class="tmpl-item"><div class="tmpl-info"><div class="tmpl-name">${escHtml(name)}</div><div class="tmpl-meta">${e.length} items · ${cal} kcal</div></div><div class="tmpl-actions"><button class="tmpl-load-btn" onclick="loadTemplate('${escAttr(name)}')">Load</button><button class="tmpl-del-btn" onclick="deleteTemplate('${escAttr(name)}')">✕</button></div></div>`;}).join('');
+  panel.innerHTML=keys.map(name=>{const e=mealTemplates[name];const cal=e.reduce((s,x)=>s+x.cal,0);return`<div class="tmpl-item"><div class="tmpl-info"><div class="tmpl-name">${escHtml(name)}</div><div class="tmpl-meta">${e.length} items · ${cal} kcal</div></div><div class="tmpl-actions"><button class="tmpl-load-btn" data-action="load-template" data-name="${escAttr(name)}">Load</button><button class="tmpl-del-btn" data-action="delete-template" data-name="${escAttr(name)}">✕</button></div></div>`;}).join('');
 }
 function loadTemplate(name){
   const t=mealTemplates[name];if(!t)return;
@@ -1245,7 +1337,7 @@ function renderCompareDrawer(){const el=g('compareTable');if(el)el.innerHTML=`<d
 g('compareSearch')?.addEventListener('input',function(){
   const q=this.value.trim();if(q.length<1){g('compareResults').innerHTML='';return;}
   const db=getAllFoods();const keys=matchKeys(q).slice(0,10);
-  g('compareResults').innerHTML=keys.map(k=>`<div class="cmp-result" onclick="setCompareB('${k}')">${escHtml(db[k].name)}</div>`).join('');
+  g('compareResults').innerHTML=keys.map(k=>`<div class="cmp-result" data-action="set-compare-b" data-key="${k}">${escHtml(db[k].name)}</div>`).join('');
 });
 function setCompareB(key){
   const db=getAllFoods(),b=db[key];if(!b||!compareFood)return;const a=compareFood;
@@ -1457,7 +1549,7 @@ function showToast(msg,type='success',withUndo=false){
   const id='t'+Date.now()+'_'+Math.random().toString(36).slice(2);
   const el=document.createElement('div');
   el.className=`toast-item${type==='warn'?' warn':''}`;el.id=id;
-  el.innerHTML=`<span class="toast-msg">${escHtml(msg)}</span>${withUndo?'<button class="toast-undo" onclick="undoLast()">Undo</button>':''}<button class="toast-close" onclick="dismissToast('${id}')">✕</button>`;
+  el.innerHTML=`<span class="toast-msg">${escHtml(msg)}</span>${withUndo?'<button class="toast-undo" data-action="undo-last">Undo</button>':''}<button class="toast-close" data-action="dismiss-toast" data-id="${id}">✕</button>`;
   c.appendChild(el);
   requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('show')));
   el._t=setTimeout(()=>dismissToast(id),3500);
@@ -1465,6 +1557,59 @@ function showToast(msg,type='success',withUndo=false){
 window.showToast=showToast;
 function dismissToast(id){const el=g(id);if(!el)return;clearTimeout(el._t);el.classList.remove('show');setTimeout(()=>el?.remove(),320);}
 window.dismissToast=dismissToast;
+
+document.addEventListener('click', (e) => {
+  const modalCloser = e.target.closest('[data-close-modal]');
+  if (modalCloser) closeModalById(modalCloser.dataset.closeModal);
+
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const { action } = el.dataset;
+  switch (action) {
+    case 'open-add-food': openAddFoodModal(el.dataset.query || ''); break;
+    case 'clear-recents': clearRecents(); break;
+    case 'apply-filter': applyFilter(el.dataset.filter || ''); break;
+    case 'toggle-meal': toggleMealCollapse(el.dataset.meal || ''); break;
+    case 'edit-entry-note': editEntryNote(+el.dataset.entryId); break;
+    case 'duplicate-entry': duplicateEntry(+el.dataset.entryId); break;
+    case 'edit-entry-portion': editEntryPortion(+el.dataset.entryId); break;
+    case 'delete-entry': deleteEntry(+el.dataset.entryId); break;
+    case 'add-water-glass': addWaterGlass(+el.dataset.waterIndex, +el.dataset.waterFilled); break;
+    case 'toggle-hist-day': toggleHistDay(el.dataset.date); break;
+    case 'load-history-day': e.stopPropagation(); loadHistoryDay(el.dataset.date); break;
+    case 'delete-history-day': e.stopPropagation(); deleteHistoryDay(el.dataset.date); break;
+    case 'use-history-entry': useHistoryEntry(el.dataset.date, +el.dataset.entryIndex); break;
+    case 'delete-history-entry': deleteHistoryEntry(el.dataset.date, +el.dataset.entryIndex); break;
+    case 'jump-hist-day': jumpToHistDay(el.dataset.date); break;
+    case 'set-cat-filter': setCatFilter(el.dataset.category); break;
+    case 'use-from-memory': useFromMemory(el.dataset.key); break;
+    case 'remove-from-memory': removeFromMemory(el.dataset.key); break;
+    case 'add-to-memory': addToMemory(el.dataset.key); break;
+    case 'edit-custom-food': editCustomFood(el.dataset.key); break;
+    case 'delete-custom-food': deleteCustomFood(el.dataset.key); break;
+    case 'load-template': loadTemplate(el.dataset.name); break;
+    case 'delete-template': deleteTemplate(el.dataset.name); break;
+    case 'set-compare-b': setCompareB(el.dataset.key); break;
+    case 'undo-last': undoLast(); break;
+    case 'dismiss-toast': dismissToast(el.dataset.id); break;
+    case 'click-log-weight': g('logWeightBtn')?.click(); break;
+    case 'unlog-burn': unlogBurn(); break;
+    case 'open-add-custom': openAddFoodModal(''); break;
+    case 'open-history': openHistoryDrawer(); closeMoreSheet(); break;
+    case 'open-memory': openMemoryDrawer(); closeMoreSheet(); break;
+    case 'open-templates': openTemplatesDrawer(); closeMoreSheet(); break;
+    case 'more-log-weight': g('logWeightBtn')?.click(); closeMoreSheet(); break;
+    case 'more-goals': openGoalsModal(); closeMoreSheet(); break;
+    case 'more-burn-calc': g('burnCalcBtn')?.click(); closeMoreSheet(); break;
+    case 'more-shortcuts': g('shortcutsBtn')?.click(); closeMoreSheet(); break;
+    case 'more-theme': g('themeBtn')?.click(); closeMoreSheet(); break;
+    case 'close-more-sheet': closeMoreSheet(); break;
+    case 'water-custom': addCustomWater(); break;
+    case 'water-undo': undoWater(); break;
+    case 'water-reset': resetWater(); break;
+    default: break;
+  }
+});
 
 /* ══════════════════════════════════════════════════════
    STORAGE SAFETY NET
@@ -1504,6 +1649,7 @@ renderMemoryCount();
 updateWeightDisplay();
 renderWeightChart();
 renderTemplatesPanel();
+initSplashScreen();
 
 
 /* ══════════════════════════════════════════════════════
@@ -1612,19 +1758,6 @@ document.addEventListener('touchend', e => {
 }, { passive: true });
 
 /* ══════════════════════════════════════════════════════
-   QOL: WATER GOAL CELEBRATION
-══════════════════════════════════════════════════════ */
-const _origAddWater = addWater;
-window.addWater = function(ml) {
-  const wasBefore = waterMl < waterGoal;
-  _origAddWater(ml);
-  if (wasBefore && waterMl >= waterGoal) {
-    // Big celebration toast
-    setTimeout(() => showToast('🎉 Water goal reached! Great hydration!'), 200);
-  }
-};
-
-/* ══════════════════════════════════════════════════════
    QOL: AUTOFOCUS AFTER LOG
    After logging a food, auto-focus search for fast multi-logging
 ══════════════════════════════════════════════════════ */
@@ -1643,4 +1776,3 @@ window.logFood = function() {
   setText('goalCarbLbl', goals.carb + 'g');
   setText('goalFatLbl',  goals.fat  + 'g');
 })();
-
