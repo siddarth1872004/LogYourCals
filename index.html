@@ -6,19 +6,25 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="NutriLog">
+  <meta name="apple-mobile-web-app-title" content="LogYourCals">
   <meta name="theme-color" content="#0e0f13">
-  <title>NutriLog</title>
+  <title>LogYourCals</title>
   <link rel="stylesheet" href="css/styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
-
+<div id="splashScreen" class="splash-screen" aria-hidden="true">
+  <div class="splash-grid"></div>
+  <div class="splash-content">
+    <div class="splash-logo">LogYourCals</div>
+    <div class="splash-tag">Track clean • Eat smart • Move better</div>
+  </div>
+</div>
 <!-- HEADER -->
 <header class="app-header">
   <div class="header-left">
-    <div class="logo">NutriLog</div>
+    <div class="logo">LogYourCals</div>
     <div id="dateBadge" class="date-badge"></div>
     <div id="streakBadge" class="streak-badge" style="display:none"></div>
     <div id="savedPulse" class="saved-pulse" title="Auto-saved">✓</div>
@@ -163,7 +169,10 @@
     <div class="water-card">
       <div class="water-header">
         <span class="section-label">💧 Water</span>
-        <span id="waterText" class="water-text">0L / 2.5L</span>
+        <div class="water-goal-wrap">
+          <span id="waterText" class="water-text">0L / 2.5L</span>
+          <button id="editWaterGoalBtn" class="water-goal-btn" title="Set water goal">Goal</button>
+        </div>
       </div>
       <div class="water-wave-wrap" id="waterWaveWrap">
         <div class="water-wave-bg" id="waterWaveBg"></div>
@@ -180,7 +189,9 @@
         <button id="waterAdd250">+250ml</button>
         <button id="waterAdd500">+500ml</button>
         <button id="waterAdd750">+750ml</button>
-        <button id="waterCustom" class="water-btn-custom">+Custom</button>
+        <button id="waterUndoBtn" data-action="water-undo" title="Undo last water change">↶ Undo</button>
+        <button id="waterResetBtn" data-action="water-reset" title="Reset today's water">Reset</button>
+        <button id="waterCustom" data-action="water-custom" class="water-btn-custom">+Custom</button>
       </div>
     </div>
 
@@ -188,7 +199,7 @@
     <div class="bodyweight-card">
       <div class="bw-header">
         <span class="section-label">⚖ Body Weight</span>
-        <button id="logWeightBtn2" class="bw-log-btn" onclick="document.getElementById('logWeightBtn').click()">Log</button>
+        <button id="logWeightBtn2" class="bw-log-btn" data-action="click-log-weight">Log</button>
       </div>
       <div class="bw-display">
         <span id="weightDisplay" class="bw-val">—</span>
@@ -229,7 +240,7 @@
           <div id="exercisePill" class="exercise-pill" style="display:none" title="Click × to remove exercise calories">
             <span class="ep-icon">🔥</span>
             <span class="ep-kcal" id="burnedPillText"></span>
-            <span class="ep-x" id="unlogBurnBtn" onclick="unlogBurn()" title="Remove exercise log">✕</span>
+            <span class="ep-x" id="unlogBurnBtn" data-action="unlog-burn" title="Remove exercise log">✕</span>
           </div>
           <div class="burn-btns">
             <button id="burnBtn"     class="burn-btn" title="Log exercise calories burned">🔥 Exercise</button>
@@ -254,6 +265,7 @@
           <div class="cri-row">
             <span class="cri-label">Goal</span>
             <span class="cri-val cri-goal" id="criGoal">2000 kcal</span>
+            <button id="editGoalsQuickBtn" class="cri-edit-btn" title="Edit calories/macros goals">Edit</button>
           </div>
           <div class="cri-row">
             <span class="cri-label">Eaten</span>
@@ -347,7 +359,7 @@
   </div>
   <div class="drawer-search">
     <input id="memorySearch" type="text" placeholder="Filter foods…" autocomplete="off">
-    <button class="add-custom-top-btn" onclick="openAddFoodModal('')">+ Custom Food</button>
+    <button class="add-custom-top-btn" data-action="open-add-custom">+ Custom Food</button>
   </div>
   <div id="memoryCats" class="cat-pills"></div>
   <div id="memoryList" class="memory-list"></div>
@@ -443,7 +455,7 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="cancel-btn" onclick="document.getElementById('addFoodModal').classList.remove('open')">Cancel</button>
+      <button class="cancel-btn" data-close-modal="addFoodModal">Cancel</button>
       <button id="saveCustomFoodBtn" class="add-btn">Save Food</button>
     </div>
   </div>
@@ -493,7 +505,7 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="cancel-btn" onclick="document.getElementById('goalsModal').classList.remove('open')">Cancel</button>
+      <button class="cancel-btn" data-close-modal="goalsModal">Cancel</button>
       <button id="saveGoalsBtn" class="add-btn">Save Goals</button>
     </div>
   </div>
@@ -503,7 +515,7 @@
 <div id="noteModal" class="modal-backdrop">
   <div class="modal-box modal-box-sm">
     <div class="modal-header"><h2>📝 Entry Note</h2>
-      <button onclick="document.getElementById('noteModal').classList.remove('open')" class="modal-close">✕</button></div>
+      <button class="modal-close" data-close-modal="noteModal">✕</button></div>
     <div class="modal-body">
       <div class="form-group">
         <label>Note</label>
@@ -531,7 +543,7 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="cancel-btn" onclick="document.getElementById('burnModal').classList.remove('open')">Cancel</button>
+      <button class="cancel-btn" data-close-modal="burnModal">Cancel</button>
       <button id="saveBurnBtn" class="add-btn">Log</button>
     </div>
   </div>
@@ -556,7 +568,7 @@
       <div id="activityResult" class="activity-result" style="display:none"></div>
     </div>
     <div class="modal-footer">
-      <button class="cancel-btn" onclick="document.getElementById('burnCalcModal').classList.remove('open')">Close</button>
+      <button class="cancel-btn" data-close-modal="burnCalcModal">Close</button>
       <button id="logActivityBurnBtn" class="add-btn">Log This Burn</button>
     </div>
   </div>
@@ -576,7 +588,7 @@
       </div>
     </div>
     <div class="modal-footer">
-      <button class="cancel-btn" onclick="document.getElementById('weightModal').classList.remove('open')">Cancel</button>
+      <button class="cancel-btn" data-close-modal="weightModal">Cancel</button>
       <button id="saveWeightBtn" class="add-btn">Save</button>
     </div>
   </div>
@@ -638,33 +650,33 @@
 <div id="moreSheet" class="more-sheet">
   <div class="more-sheet-handle"></div>
   <div class="more-sheet-grid">
-    <button class="more-item" onclick="openHistoryDrawer();closeMoreSheet()">
+    <button class="more-item" data-action="open-history">
       <span class="more-icon">📅</span><span>History</span>
     </button>
-    <button class="more-item" onclick="openMemoryDrawer();closeMoreSheet()">
+    <button class="more-item" data-action="open-memory">
       <span class="more-icon">🧠</span><span>Memory</span>
     </button>
-    <button class="more-item" onclick="openTemplatesDrawer();closeMoreSheet()">
+    <button class="more-item" data-action="open-templates">
       <span class="more-icon">📋</span><span>Templates</span>
     </button>
-    <button class="more-item" onclick="document.getElementById('logWeightBtn').click();closeMoreSheet()">
+    <button class="more-item" data-action="more-log-weight">
       <span class="more-icon">⚖</span><span>Weight</span>
     </button>
-    <button class="more-item" onclick="openGoalsModal();closeMoreSheet()">
+    <button class="more-item" data-action="more-goals">
       <span class="more-icon">🎯</span><span>Goals</span>
     </button>
-    <button class="more-item" onclick="document.getElementById('burnCalcBtn').click();closeMoreSheet()">
+    <button class="more-item" data-action="more-burn-calc">
       <span class="more-icon">⚡</span><span>Burn Calc</span>
     </button>
-    <button class="more-item" onclick="document.getElementById('shortcutsBtn').click();closeMoreSheet()">
+    <button class="more-item" data-action="more-shortcuts">
       <span class="more-icon">⌨</span><span>Shortcuts</span>
     </button>
-    <button class="more-item" onclick="document.getElementById('themeBtn').click();closeMoreSheet()">
+    <button class="more-item" data-action="more-theme">
       <span class="more-icon">🎨</span><span>Theme</span>
     </button>
   </div>
 </div>
-<div id="moreSheetOverlay" class="more-sheet-overlay" onclick="closeMoreSheet()"></div>
+<div id="moreSheetOverlay" class="more-sheet-overlay" data-action="close-more-sheet"></div>
 
 <div id="toastContainer" class="toast-container"></div>
 
