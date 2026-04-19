@@ -94,6 +94,17 @@ function setVal(id,v)  { const e=document.getElementById(id); if(e) e.value=v; }
 function setW(id,pct)  { const e=document.getElementById(id); if(e) e.style.width=Math.min(100,pct)+'%'; }
 function g(id)         { return document.getElementById(id); }
 function closeModalById(id) { g(id)?.classList.remove('open'); }
+function initSplashScreen() {
+  const splash = g('splashScreen');
+  const finish = () => {
+    document.body.classList.add('app-ready');
+    splash?.classList.add('hide');
+    setTimeout(() => splash?.remove(), 700);
+  };
+  if (document.readyState === 'complete') setTimeout(finish, 500);
+  else window.addEventListener('load', () => setTimeout(finish, 500), { once: true });
+  setTimeout(finish, 2200); // safety fallback
+}
 
 /* ─── Init: day rollover + load today ─────────────── */
 (function init() {
@@ -1638,6 +1649,7 @@ renderMemoryCount();
 updateWeightDisplay();
 renderWeightChart();
 renderTemplatesPanel();
+initSplashScreen();
 
 
 /* ══════════════════════════════════════════════════════
