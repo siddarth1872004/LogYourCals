@@ -391,10 +391,10 @@ body {
 /* Wave container */
 .water-wave-wrap { position:relative; height:54px; margin:0 -16px; overflow:hidden; margin-bottom:10px; }
 .water-wave-bg { position:absolute; bottom:0; left:0; right:0; background:rgba(41,182,246,.08); transition:height .6s cubic-bezier(.4,0,.2,1); }
-.water-wave { position:absolute; bottom:100%; left:-50%; width:200%; height:30px; }
+.water-wave { position:absolute; bottom:0; left:-50%; width:200%; height:30px; transform:translateY(100%); transition:transform .6s cubic-bezier(.4,0,.2,1); will-change:transform; }
 .water-wave svg { width:100%; height:100%; }
 .water-wave path { fill:rgba(41,182,246,.15); animation:waveSway 3s ease-in-out infinite; transform-origin:center bottom; }
-.water-wave:nth-child(2) path { fill:rgba(41,182,246,.1); animation:waveSway 4s ease-in-out infinite reverse; animation-delay:-1s; }
+#waterWave2 path { fill:rgba(41,182,246,.1); animation:waveSway 4s ease-in-out infinite reverse; animation-delay:-1s; }
 @keyframes waveSway { 0%,100%{transform:translateX(0)} 50%{transform:translateX(-8%)} }
 .water-pct-text { position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:.72rem; color:var(--water); font-family:'DM Mono',monospace; font-weight:700; z-index:2; }
 
@@ -409,6 +409,13 @@ body {
 .water-btns button { background:var(--bg3); border:1px solid var(--border); color:var(--text2); padding:6px 10px; border-radius:var(--r-sm); font-size:.73rem; font-family:inherit; cursor:pointer; transition:var(--trans); }
 .water-btns button:hover { border-color:var(--water); color:var(--water); background:var(--water-soft); transform:translateY(-1px); }
 .water-btn-custom { margin-left:auto !important; }
+.water-log-tools { margin-top:8px; display:flex; justify-content:flex-end; }
+.water-undo-btn { background:transparent; border:1px dashed var(--border2); color:var(--text3); padding:5px 9px; border-radius:var(--r-xs); font-size:.68rem; cursor:pointer; transition:var(--trans); }
+.water-undo-btn:hover { border-color:var(--water); color:var(--water); background:var(--water-soft); }
+.water-log-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; min-height:20px; }
+.water-log-chip { display:inline-flex; align-items:center; gap:6px; background:rgba(41,182,246,.1); border:1px solid rgba(41,182,246,.2); color:var(--water); border-radius:999px; padding:3px 8px; font-size:.68rem; font-family:'DM Mono',monospace; }
+.water-log-chip button { border:none; background:transparent; color:inherit; cursor:pointer; font-size:.72rem; line-height:1; opacity:.75; }
+.water-log-chip button:hover { opacity:1; }
 
 /* ══════════════════════════════════════════════════════
    BODY WEIGHT CARD

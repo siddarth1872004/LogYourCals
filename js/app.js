@@ -27,6 +27,7 @@ let mealTemplates= _load('nutrilog_meal_templates')|| {};
 let logEntries     = [];
 let dailyTotals    = { cal:0, prot:0, carb:0, fat:0 };
 let waterMl        = 0;
+let waterLogs      = _load('nutrilog_water_logs') || [];
 let caloriesBurned = 0;
 let currentMeal    = localStorage.getItem('nutrilog_curmeal') || autoDetectMeal();
 
@@ -44,6 +45,7 @@ let portionMemory  = _load('nutrilog_portion_memory') || {};
 let savedPulseTimer= null;
 let compareFood    = null;
 let mealTemplatesCache = {};
+let prevCalorieDisplay = Math.round(dailyTotals.cal);
 
 /* ─── Tiny helpers ─────────────────────────────────── */
 function _save(k, v) {
@@ -97,13 +99,16 @@ function g(id)         { return document.getElementById(id); }
     localStorage.setItem('nutrilog_date', today);
     localStorage.removeItem('nutrilog_log_today');
     localStorage.removeItem('nutrilog_water_today');
+    localStorage.removeItem('nutrilog_water_logs');
     localStorage.removeItem('nutrilog_burned_today');
     _updateStreak(today);
     waterMl = caloriesBurned = 0;
+    waterLogs = [];
   } else {
     if (!saved) localStorage.setItem('nutrilog_date', today);
     logEntries     = _load('nutrilog_log_today') || [];
     waterMl        = parseInt(localStorage.getItem('nutrilog_water_today') || '0');
+    waterLogs      = _load('nutrilog_water_logs') || [];
     caloriesBurned = parseInt(localStorage.getItem('nutrilog_burned_today') || '0');
   }
   recomputeTotals();
@@ -479,6 +484,7 @@ function logFood() {
   renderLog(); updateTotals();
   showToast(`${currentFood.name} logged · +${cal} kcal`,'success',true);
   portionCard.classList.remove('visible'); foodInput.value=''; currentFood=null;
+  setTimeout(() => { g('foodInput')?.focus(); g('foodInput')?.select(); }, 250);
 }
 
 function deleteEntry(id) {
@@ -667,10 +673,20 @@ function updateTotals() {
   const net     = dailyTotals.cal - caloriesBurned;
   const netGoal = goals.cal + caloriesBurned;
   const rem     = netGoal - net;
+  const newCalorieDisplay = Math.round(dailyTotals.cal);
 
   // ── Calorie ring ───────────────────────────────────
-  setText('calRingNum', Math.round(dailyTotals.cal));
-  setText('totalCal',   Math.round(dailyTotals.cal));  // hidden compat
+  setText('calRingNum', newCalorieDisplay);
+  setText('totalCal',   newCalorieDisplay);  // hidden compat
+  if (newCalorieDisplay !== prevCalorieDisplay) {
+    const ringNum = g('calRingNum');
+    if (ringNum) {
+      ringNum.classList.remove('num-tick');
+      void ringNum.offsetWidth;
+      ringNum.classList.add('num-tick');
+    }
+    prevCalorieDisplay = newCalorieDisplay;
+  }
   const ringEl = g('calRingFill');
   if (ringEl) {
     const circ   = 2 * Math.PI * 39;
@@ -779,9 +795,10 @@ function updateWaterUI() {
   const bg = g('waterWaveBg');
   if (bg) bg.style.height = pct + '%';
   const w1 = g('waterWave1'), w2 = g('waterWave2');
-  const waveBottom = pct + '%';
-  if (w1) w1.style.bottom = waveBottom;
-  if (w2) w2.style.bottom = waveBottom;
+  const wrapH = g('waterWaveWrap')?.offsetHeight || 54;
+  const risePx = (pct / 100) * wrapH;
+  if (w1) w1.style.transform = `translate3d(0, ${-risePx}px, 0)`;
+  if (w2) w2.style.transform = `translate3d(0, ${-risePx}px, 0)`;
   const pt = g('waterPctText');
   if (pt) pt.textContent = pct >= 5 ? Math.round(pct) + '%' : '';
 
@@ -793,6 +810,14 @@ function updateWaterUI() {
   if (glasses) glasses.innerHTML = Array.from({length:10}, (_,i) =>
     `<button class="water-glass${i < filled ? ' full' : ''}" onclick="addWaterGlass(${i},${filled})" title="${i < filled ? 'Remove 250ml' : 'Add 250ml'}">💧</button>`
   ).join('');
+
+  const waterLogList = g('waterLogList');
+  if (waterLogList) {
+    const recent = waterLogs.slice(-8).reverse();
+    waterLogList.innerHTML = recent.length
+      ? recent.map(entry => `<span class="water-log-chip">${entry.ml}ml <button title="Unlog ${entry.ml}ml" onclick="unlogWater('${entry.id}')">✕</button></span>`).join('')
+      : '';
+  }
 }
 
 function addWaterGlass(idx, filled) {
@@ -807,15 +832,42 @@ function addWaterGlass(idx, filled) {
 }
 window.addWaterGlass = addWaterGlass;
 function addWater(ml){
-  waterMl=Math.max(0,waterMl+ml); localStorage.setItem('nutrilog_water_today',waterMl); updateWaterUI();
-  if(ml>0&&waterMl>=waterGoal&&waterMl-ml<waterGoal) showToast('💧 Water goal reached! 🎉');
+  const prev = waterMl;
+  waterMl=Math.max(0,waterMl+ml);
+  if (ml > 0) {
+    waterLogs.push({ id:`w_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, ml:Math.round(ml), at:new Date().toISOString() });
+    if (waterLogs.length > 60) waterLogs = waterLogs.slice(-60);
+    _save('nutrilog_water_logs', waterLogs);
+  }
+  localStorage.setItem('nutrilog_water_today',waterMl);
+  updateWaterUI();
+  if(ml>0&&waterMl>=waterGoal&&waterMl-ml<waterGoal) showToast('🎉 Water goal reached! Great hydration!');
   else if(ml>0) showToast(`+${ml}ml · ${(waterMl/1000).toFixed(1)}L today`);
+  else if (ml < 0 && prev !== waterMl) showToast(`${Math.abs(ml)}ml removed from water log`,'warn');
 }
 window.addWater=addWater;
+function unlogWater(id){
+  const idx = waterLogs.findIndex(w => w.id === id);
+  if (idx === -1) { showToast('Water log not found','warn'); return; }
+  const [entry] = waterLogs.splice(idx,1);
+  _save('nutrilog_water_logs', waterLogs);
+  waterMl = Math.max(0, waterMl - (entry.ml || 0));
+  localStorage.setItem('nutrilog_water_today',waterMl);
+  updateWaterUI();
+  showToast(`${entry.ml}ml unlogged`,'warn');
+}
+window.unlogWater = unlogWater;
+function undoLastWaterLog(){
+  const last = waterLogs.at(-1);
+  if(!last){showToast('No logged water to undo','warn');return;}
+  unlogWater(last.id);
+}
+window.undoLastWaterLog = undoLastWaterLog;
 g('waterAdd250')?.addEventListener('click',()=>addWater(250));
 g('waterAdd500')?.addEventListener('click',()=>addWater(500));
 g('waterAdd750')?.addEventListener('click',()=>addWater(750));
 g('waterCustom')?.addEventListener('click',()=>{const a=parseInt(prompt('Add water (ml):','330'));if(a>0)addWater(a);});
+g('undoWaterBtn')?.addEventListener('click',undoLastWaterLog);
 
 /* ══════════════════════════════════════════════════════
    CALORIES BURNED
@@ -1309,7 +1361,7 @@ function renderWeightChart(){
 ══════════════════════════════════════════════════════ */
 g('exportBtn')?.addEventListener('click',()=>{
   const data={version:3,exported:new Date().toISOString(),goals,waterGoal,mealGroups,savedFoods,history,userFoods:USER_DB,recents:recentFoods,templates:mealTemplates,bodyWeight,streak:streakData,
-    today:{date:todayKey(),entries:logEntries,waterMl,burned:caloriesBurned}};
+    today:{date:todayKey(),entries:logEntries,waterMl,waterLogs,burned:caloriesBurned}};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`nutrilog-${todayKey()}.json`;a.click();URL.revokeObjectURL(url);showToast('Data exported ✓');
 });
@@ -1329,7 +1381,10 @@ g('importFile')?.addEventListener('change',function(e){
       if(data.templates)Object.assign(mealTemplates,data.templates);_save('nutrilog_meal_templates',mealTemplates);
       if(data.bodyWeight){bodyWeight=[...bodyWeight,...data.bodyWeight].filter((v,i,a)=>a.findIndex(x=>x.date===v.date)===i).sort((a,b)=>a.date.localeCompare(b.date));_save('nutrilog_bodyweight',bodyWeight);}
       if(data.streak&&data.streak.count>streakData.count)streakData=data.streak;_save('nutrilog_streak',streakData);
-      if(data.today?.entries&&data.today.date===todayKey()){logEntries=data.today.entries;waterMl=data.today.waterMl||0;caloriesBurned=data.today.burned||0;persistLog();localStorage.setItem('nutrilog_water_today',waterMl);localStorage.setItem('nutrilog_burned_today',caloriesBurned);}
+      if(data.today?.entries&&data.today.date===todayKey()){
+        logEntries=data.today.entries;waterMl=data.today.waterMl||0;waterLogs=data.today.waterLogs||[];caloriesBurned=data.today.burned||0;
+        persistLog();localStorage.setItem('nutrilog_water_today',waterMl);_save('nutrilog_water_logs',waterLogs);localStorage.setItem('nutrilog_burned_today',caloriesBurned);
+      }
       recomputeTotals();renderLog();updateTotals();updateWaterUI();renderMemoryCount();updateWeightDisplay();renderWeightChart();
       g('goalsModal')?.classList.remove('open');showToast('Import successful ✓');
     }catch(err){showToast('Import failed: '+err.message,'warn');}
@@ -1473,6 +1528,7 @@ window.dismissToast=dismissToast;
 function saveAllState(){
   _save('nutrilog_log_today',logEntries);
   localStorage.setItem('nutrilog_water_today',waterMl);
+  _save('nutrilog_water_logs',waterLogs);
   localStorage.setItem('nutrilog_burned_today',caloriesBurned);
   _save('nutrilog_userfoods',USER_DB);
   _save('nutrilog_savedfoods',savedFoods);
@@ -1520,23 +1576,6 @@ document.addEventListener('click', e => {
   btn.appendChild(r);
   setTimeout(() => r.remove(), 600);
 });
-
-/* ══════════════════════════════════════════════════════
-   QOL: ANIMATED NUMBER CHANGES
-══════════════════════════════════════════════════════ */
-let _prevCal = 0;
-const _origUpdateTotals = updateTotals;
-function updateTotalsAnimated() {
-  const newCal = Math.round(dailyTotals.cal);
-  _origUpdateTotals();
-  // Animate calorie ring number if it changed
-  if (newCal !== _prevCal) {
-    const el = g('calRingNum');
-    if (el) { el.classList.remove('num-tick'); void el.offsetWidth; el.classList.add('num-tick'); }
-    _prevCal = newCal;
-  }
-}
-window.updateTotals = updateTotalsAnimated;
 
 /* ══════════════════════════════════════════════════════
    QOL: SWIPE TO DELETE LOG ENTRIES (mobile)
@@ -1612,29 +1651,6 @@ document.addEventListener('touchend', e => {
 }, { passive: true });
 
 /* ══════════════════════════════════════════════════════
-   QOL: WATER GOAL CELEBRATION
-══════════════════════════════════════════════════════ */
-const _origAddWater = addWater;
-window.addWater = function(ml) {
-  const wasBefore = waterMl < waterGoal;
-  _origAddWater(ml);
-  if (wasBefore && waterMl >= waterGoal) {
-    // Big celebration toast
-    setTimeout(() => showToast('🎉 Water goal reached! Great hydration!'), 200);
-  }
-};
-
-/* ══════════════════════════════════════════════════════
-   QOL: AUTOFOCUS AFTER LOG
-   After logging a food, auto-focus search for fast multi-logging
-══════════════════════════════════════════════════════ */
-const _origLogFood = logFood;
-window.logFood = function() {
-  _origLogFood();
-  setTimeout(() => { if (!currentFood) { g('foodInput')?.focus(); g('foodInput')?.select(); } }, 250);
-};
-
-/* ══════════════════════════════════════════════════════
    QOL: GOALS LABEL SYNC on load
 ══════════════════════════════════════════════════════ */
 (function syncGoalLabels() {
@@ -1643,4 +1659,3 @@ window.logFood = function() {
   setText('goalCarbLbl', goals.carb + 'g');
   setText('goalFatLbl',  goals.fat  + 'g');
 })();
-
