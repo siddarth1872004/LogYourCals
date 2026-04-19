@@ -796,7 +796,8 @@ function updateMotivationalMsg() {
 ══════════════════════════════════════════════════════ */
 function updateWaterUI() {
   const pct = Math.min(100, (waterMl / waterGoal) * 100);
-  const level = 100 - pct;
+  const visualPct = Math.max(4, pct); // keep a tiny baseline so the water area never looks broken/empty
+  const level = 100 - visualPct;
 
   // Wave animation
   const wrap = g('waterWaveWrap');
@@ -874,8 +875,6 @@ function addCustomWater() {
   if(a>0)addWater(a);
 }
 function undoWater() {
-g('waterCustom')?.addEventListener('click',()=>{const a=parseInt(prompt('Add water (ml):','330'));if(a>0)addWater(a);});
-g('waterUndoBtn')?.addEventListener('click', () => {
   const last = waterUndoStack.pop();
   if (!last) return;
   _save('nutrilog_water_undo', waterUndoStack);
