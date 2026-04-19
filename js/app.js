@@ -44,6 +44,7 @@ let portionMemory  = _load('nutrilog_portion_memory') || {};
 let savedPulseTimer= null;
 let compareFood    = null;
 let mealTemplatesCache = {};
+let prevCalorieDisplay = Math.round(dailyTotals.cal);
 
 /* ─── Tiny helpers ─────────────────────────────────── */
 function _save(k, v) {
@@ -479,6 +480,7 @@ function logFood() {
   renderLog(); updateTotals();
   showToast(`${currentFood.name} logged · +${cal} kcal`,'success',true);
   portionCard.classList.remove('visible'); foodInput.value=''; currentFood=null;
+  setTimeout(() => { g('foodInput')?.focus(); g('foodInput')?.select(); }, 250);
 }
 
 function deleteEntry(id) {
@@ -667,10 +669,20 @@ function updateTotals() {
   const net     = dailyTotals.cal - caloriesBurned;
   const netGoal = goals.cal + caloriesBurned;
   const rem     = netGoal - net;
+  const newCalorieDisplay = Math.round(dailyTotals.cal);
 
   // ── Calorie ring ───────────────────────────────────
-  setText('calRingNum', Math.round(dailyTotals.cal));
-  setText('totalCal',   Math.round(dailyTotals.cal));  // hidden compat
+  setText('calRingNum', newCalorieDisplay);
+  setText('totalCal',   newCalorieDisplay);  // hidden compat
+  if (newCalorieDisplay !== prevCalorieDisplay) {
+    const ringNum = g('calRingNum');
+    if (ringNum) {
+      ringNum.classList.remove('num-tick');
+      void ringNum.offsetWidth;
+      ringNum.classList.add('num-tick');
+    }
+    prevCalorieDisplay = newCalorieDisplay;
+  }
   const ringEl = g('calRingFill');
   if (ringEl) {
     const circ   = 2 * Math.PI * 39;
@@ -808,7 +820,7 @@ function addWaterGlass(idx, filled) {
 window.addWaterGlass = addWaterGlass;
 function addWater(ml){
   waterMl=Math.max(0,waterMl+ml); localStorage.setItem('nutrilog_water_today',waterMl); updateWaterUI();
-  if(ml>0&&waterMl>=waterGoal&&waterMl-ml<waterGoal) showToast('💧 Water goal reached! 🎉');
+  if(ml>0&&waterMl>=waterGoal&&waterMl-ml<waterGoal) showToast('🎉 Water goal reached! Great hydration!');
   else if(ml>0) showToast(`+${ml}ml · ${(waterMl/1000).toFixed(1)}L today`);
 }
 window.addWater=addWater;
@@ -1522,23 +1534,6 @@ document.addEventListener('click', e => {
 });
 
 /* ══════════════════════════════════════════════════════
-   QOL: ANIMATED NUMBER CHANGES
-══════════════════════════════════════════════════════ */
-let _prevCal = 0;
-const _origUpdateTotals = updateTotals;
-function updateTotalsAnimated() {
-  const newCal = Math.round(dailyTotals.cal);
-  _origUpdateTotals();
-  // Animate calorie ring number if it changed
-  if (newCal !== _prevCal) {
-    const el = g('calRingNum');
-    if (el) { el.classList.remove('num-tick'); void el.offsetWidth; el.classList.add('num-tick'); }
-    _prevCal = newCal;
-  }
-}
-window.updateTotals = updateTotalsAnimated;
-
-/* ══════════════════════════════════════════════════════
    QOL: SWIPE TO DELETE LOG ENTRIES (mobile)
 ══════════════════════════════════════════════════════ */
 let swipeStart = null;
@@ -1612,29 +1607,6 @@ document.addEventListener('touchend', e => {
 }, { passive: true });
 
 /* ══════════════════════════════════════════════════════
-   QOL: WATER GOAL CELEBRATION
-══════════════════════════════════════════════════════ */
-const _origAddWater = addWater;
-window.addWater = function(ml) {
-  const wasBefore = waterMl < waterGoal;
-  _origAddWater(ml);
-  if (wasBefore && waterMl >= waterGoal) {
-    // Big celebration toast
-    setTimeout(() => showToast('🎉 Water goal reached! Great hydration!'), 200);
-  }
-};
-
-/* ══════════════════════════════════════════════════════
-   QOL: AUTOFOCUS AFTER LOG
-   After logging a food, auto-focus search for fast multi-logging
-══════════════════════════════════════════════════════ */
-const _origLogFood = logFood;
-window.logFood = function() {
-  _origLogFood();
-  setTimeout(() => { if (!currentFood) { g('foodInput')?.focus(); g('foodInput')?.select(); } }, 250);
-};
-
-/* ══════════════════════════════════════════════════════
    QOL: GOALS LABEL SYNC on load
 ══════════════════════════════════════════════════════ */
 (function syncGoalLabels() {
@@ -1643,4 +1615,3 @@ window.logFood = function() {
   setText('goalCarbLbl', goals.carb + 'g');
   setText('goalFatLbl',  goals.fat  + 'g');
 })();
-
