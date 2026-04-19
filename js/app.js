@@ -869,17 +869,25 @@ window.addWater=addWater;
 g('waterAdd250')?.addEventListener('click',()=>addWater(250));
 g('waterAdd500')?.addEventListener('click',()=>addWater(500));
 g('waterAdd750')?.addEventListener('click',()=>addWater(750));
+function addCustomWater() {
+  const a=parseInt(prompt('Add water (ml):','330'));
+  if(a>0)addWater(a);
+}
+function undoWater() {
 g('waterCustom')?.addEventListener('click',()=>{const a=parseInt(prompt('Add water (ml):','330'));if(a>0)addWater(a);});
 g('waterUndoBtn')?.addEventListener('click', () => {
   const last = waterUndoStack.pop();
   if (!last) return;
   _save('nutrilog_water_undo', waterUndoStack);
   addWater(-last, { trackUndo: false });
-});
-g('waterResetBtn')?.addEventListener('click', () => {
+}
+function resetWater() {
   if (!waterMl) return;
   addWater(-waterMl);
-});
+}
+g('waterCustom')?.addEventListener('click', addCustomWater);
+g('waterUndoBtn')?.addEventListener('click', undoWater);
+g('waterResetBtn')?.addEventListener('click', resetWater);
 
 /* ══════════════════════════════════════════════════════
    CALORIES BURNED
@@ -1576,6 +1584,9 @@ document.addEventListener('click', (e) => {
     case 'more-shortcuts': g('shortcutsBtn')?.click(); closeMoreSheet(); break;
     case 'more-theme': g('themeBtn')?.click(); closeMoreSheet(); break;
     case 'close-more-sheet': closeMoreSheet(); break;
+    case 'water-custom': addCustomWater(); break;
+    case 'water-undo': undoWater(); break;
+    case 'water-reset': resetWater(); break;
     default: break;
   }
 });
