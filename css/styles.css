@@ -390,13 +390,18 @@ body {
 
 /* Wave container */
 .water-wave-wrap { position:relative; height:54px; margin:0 -16px; overflow:hidden; margin-bottom:10px; }
-.water-wave-bg { position:absolute; bottom:0; left:0; right:0; background:rgba(41,182,246,.08); transition:height .6s cubic-bezier(.4,0,.2,1); }
-.water-wave { position:absolute; bottom:100%; left:-50%; width:200%; height:30px; }
+.water-wave-bg { position:absolute; inset:0; background:rgba(41,182,246,.08); transform:translateY(100%); transition:transform .45s cubic-bezier(.4,0,.2,1); }
+.water-wave { position:absolute; bottom:0; left:-50%; width:200%; height:30px; transform:translateY(100%); transition:transform .45s cubic-bezier(.4,0,.2,1); }
 .water-wave svg { width:100%; height:100%; }
 .water-wave path { fill:rgba(41,182,246,.15); animation:waveSway 3s ease-in-out infinite; transform-origin:center bottom; }
 .water-wave:nth-child(2) path { fill:rgba(41,182,246,.1); animation:waveSway 4s ease-in-out infinite reverse; animation-delay:-1s; }
 @keyframes waveSway { 0%,100%{transform:translateX(0)} 50%{transform:translateX(-8%)} }
 .water-pct-text { position:absolute; right:16px; top:50%; transform:translateY(-50%); font-size:.72rem; color:var(--water); font-family:'DM Mono',monospace; font-weight:700; z-index:2; }
+.water-wave-wrap.pulse-up { animation:waterPulseUp .45s ease; }
+.water-wave-wrap.pulse-down { animation:waterPulseDown .45s ease; }
+.water-wave-wrap.goal-reached { box-shadow: inset 0 0 0 1px rgba(41,182,246,.28); }
+@keyframes waterPulseUp { 0%{filter:brightness(1)} 40%{filter:brightness(1.25)} 100%{filter:brightness(1)} }
+@keyframes waterPulseDown { 0%{filter:brightness(1)} 40%{filter:brightness(.85)} 100%{filter:brightness(1)} }
 
 .water-glasses { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:10px; }
 .water-glass { font-size:1.05rem; cursor:pointer; opacity:.2; transition:all .2s cubic-bezier(.34,1.56,.64,1); background:none; border:none; padding:2px; }
@@ -408,6 +413,7 @@ body {
 .water-btns { display:flex; gap:5px; }
 .water-btns button { background:var(--bg3); border:1px solid var(--border); color:var(--text2); padding:6px 10px; border-radius:var(--r-sm); font-size:.73rem; font-family:inherit; cursor:pointer; transition:var(--trans); }
 .water-btns button:hover { border-color:var(--water); color:var(--water); background:var(--water-soft); transform:translateY(-1px); }
+.water-btns button:disabled { opacity:.45; cursor:not-allowed; transform:none; border-color:var(--border); color:var(--text3); background:var(--bg3); }
 .water-btn-custom { margin-left:auto !important; }
 
 /* ══════════════════════════════════════════════════════
